@@ -1,25 +1,18 @@
+"use client";
+
+import { useState } from "react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-const sourceItems = [
-  {
-    title: "The Future of Conversational Podcasting",
-    domain: "futureaudio.co",
-    status: "Scraped",
-  },
-  {
-    title: "Voice Design Principles for AI Hosts",
-    domain: "uxvoices.dev",
-    status: "Ready",
-  },
-  {
-    title: "Narrative Structures that Improve Retention",
-    domain: "storylab.fm",
-    status: "Queued",
-  },
-];
+type ScrapedSource = {
+  title: string;
+  sourceURL: string;
+  excerpt: string;
+  characters: number;
+};
 
 const conversationRounds = [
   {
@@ -40,7 +33,7 @@ const conversationRounds = [
   },
   {
     host: "Host Maya",
-    text: "It also suggests adding contrasting opinions so each round has healthy tension, which keeps the dialogue alive.",
+    text: "It also suggests adding contrasting opinions so each round has light tension, which keeps the dialogue alive.",
   },
   {
     host: "Host Theo",
@@ -65,9 +58,61 @@ const conversationRounds = [
 ];
 
 export default function Home() {
-  const url = "https://example.com/conversational-podcasting";
-  const isPlaying = false;
+  const [url, setUrl] = useState("https://example.com/conversational-podcasting");
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isFetchingSource, setIsFetchingSource] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [scrapedSource, setScrapedSource] = useState<ScrapedSource | null>(null);
+  const [lastFetchedUrl, setLastFetchedUrl] = useState<string | null>(null);
+
   const isPlayable = conversationRounds.length > 0;
+
+  const handleFetchSource = async () => {
+    const normalizedUrl = url.trim();
+
+    if (!normalizedUrl) {
+      setFetchError("Please provide a website URL.");
+      setScrapedSource(null);
+      return;
+    }
+
+    setIsFetchingSource(true);
+    setFetchError(null);
+
+    try {
+      const response = await fetch("/api/scrape", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: normalizedUrl }),
+      });
+
+      const payload = (await response.json()) as Partial<ScrapedSource> & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to scrape the provided URL.");
+      }
+
+      if (!payload.title || !payload.sourceURL || !payload.excerpt || typeof payload.characters !== "number") {
+        throw new Error("Received an invalid scrape response.");
+      }
+
+      setScrapedSource({
+        title: payload.title,
+        sourceURL: payload.sourceURL,
+        excerpt: payload.excerpt,
+        characters: payload.characters,
+      });
+      setLastFetchedUrl(payload.sourceURL);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to scrape the provided URL.";
+      setFetchError(message);
+      setScrapedSource(null);
+    } finally {
+      setIsFetchingSource(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background px-4 py-5 text-foreground sm:px-6 lg:px-8">
@@ -97,8 +142,8 @@ export default function Home() {
         <main className="grid gap-4 lg:grid-cols-12">
           <Card className="rounded-2xl lg:col-span-3">
             <CardHeader className="flex-row items-center justify-between border-b border-border">
-              <CardTitle className="text-2xl font-medium">Sources</CardTitle>
-              <Badge variant="secondary">URL</Badge>
+              <CardTitle className="text-2xl font-medium">Capture Web Content</CardTitle>
+              <Badge variant="secondary">Firecrawl</Badge>
             </CardHeader>
 
             <CardContent className="space-y-4 p-4">
@@ -108,30 +153,62 @@ export default function Home() {
                   <Input
                     type="url"
                     value={url}
-                    readOnly
+                    onChange={(event) => setUrl(event.target.value)}
                     placeholder="https://example.com/article"
                   />
-                  <Button className="mt-3 w-full">Scrape website</Button>
+                  <Button className="mt-3 w-full" onClick={handleFetchSource} disabled={isFetchingSource}>
+                    {isFetchingSource ? "Fetching..." : "Fetch"}
+                  </Button>
                 </CardContent>
               </Card>
 
               <p className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-                Current mock URL: {url}
+                {lastFetchedUrl ? `Last fetched URL: ${lastFetchedUrl}` : "No source fetched yet."}
               </p>
 
-              <div className="space-y-2">
-                {sourceItems.map((item) => (
-                  <Card key={item.title} className="transition-colors hover:bg-muted/40">
-                    <CardContent className="p-3">
-                      <p className="text-sm font-medium">{item.title}</p>
-                      <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{item.domain}</span>
-                        <Badge variant="secondary">{item.status}</Badge>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+              {isFetchingSource ? (
+                <Card className="border-border bg-muted/40">
+                  <CardContent className="p-3">
+                    <p className="text-sm font-medium">Fetching source content...</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Firecrawl is scraping the page and preparing markdown output.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {!isFetchingSource && fetchError ? (
+                <Card className="border-destructive/30 bg-destructive/5">
+                  <CardContent className="p-3">
+                    <p className="text-sm font-medium text-destructive">Fetch failed</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{fetchError}</p>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {!isFetchingSource && !fetchError && scrapedSource ? (
+                <Card className="transition-colors hover:bg-muted/40">
+                  <CardContent className="space-y-3 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium">{scrapedSource.title}</p>
+                      <Badge variant="secondary">Scraped</Badge>
+                    </div>
+                    <p className="text-xs leading-relaxed text-muted-foreground">{scrapedSource.excerpt}</p>
+                    <p className="text-xs text-muted-foreground">{scrapedSource.characters} markdown characters</p>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {!isFetchingSource && !fetchError && !scrapedSource ? (
+                <Card className="bg-muted/40">
+                  <CardContent className="p-3">
+                    <p className="text-sm font-medium">Scraped excerpt</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Press Fetch to scrape a URL and show an excerpt here.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -179,13 +256,23 @@ export default function Home() {
               </Card>
 
               <div className="space-y-2">
-                <Button disabled={!isPlayable || isPlaying} className="w-full">
+                <Button disabled={!isPlayable || isPlaying} onClick={() => setIsPlaying(true)} className="w-full">
                   Play
                 </Button>
-                <Button disabled={!isPlayable || !isPlaying} variant="outline" className="w-full">
+                <Button
+                  disabled={!isPlayable || !isPlaying}
+                  variant="outline"
+                  onClick={() => setIsPlaying(false)}
+                  className="w-full"
+                >
                   Pause
                 </Button>
-                <Button disabled={!isPlayable} variant="secondary" className="w-full">
+                <Button
+                  disabled={!isPlayable}
+                  variant="secondary"
+                  onClick={() => setIsPlaying(false)}
+                  className="w-full"
+                >
                   Restate audio
                 </Button>
               </div>
@@ -205,7 +292,9 @@ export default function Home() {
                 </CardContent>
               </Card>
 
-              <p className="text-center text-xs text-muted-foreground">All data shown is mock for UI and UX testing.</p>
+              <p className="text-center text-xs text-muted-foreground">
+                Conversation and audio data are still mock for UI testing.
+              </p>
             </CardContent>
           </Card>
         </main>
