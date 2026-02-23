@@ -11,8 +11,10 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.30",
+    "@elevenlabs/elevenlabs-js": "^2.36.0",
     "@mendable/firecrawl-js": "^4.13.0",
     "ai": "^6.0.97",
+    "dotenv": "^17.3.1",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"

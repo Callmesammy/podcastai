@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,18 +19,174 @@ type ConversationRound = {
   text: string;
 };
 
+type ConversationStreamEvent = {
+  type?: unknown;
+  rounds?: unknown;
+  message?: unknown;
+  error?: unknown;
+  fallback?: unknown;
+};
+
+const EXPECTED_ROUNDS = 10;
+
+function parseConversationRounds(rounds: unknown): ConversationRound[] {
+  if (!Array.isArray(rounds)) {
+    return [];
+  }
+
+  return rounds
+    .slice(0, EXPECTED_ROUNDS)
+    .map((round, index) => {
+      const candidate = round as { host?: unknown; text?: unknown };
+      const host =
+        typeof candidate.host === "string" && candidate.host.trim().length > 0
+          ? candidate.host.trim()
+          : index % 2 === 0
+            ? "Arabella"
+            : "Grandpa Spuds Oxley";
+      const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
+
+      if (!text) {
+        return null;
+      }
+
+      return { host, text };
+    })
+    .filter((round): round is ConversationRound => round !== null);
+}
+
 export default function Home() {
   const [url, setUrl] = useState("https://example.com/conversational-podcasting");
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFetchingSource, setIsFetchingSource] = useState(false);
   const [isGeneratingConversation, setIsGeneratingConversation] = useState(false);
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [conversationError, setConversationError] = useState<string | null>(null);
+  const [conversationNotice, setConversationNotice] = useState<string | null>(null);
+  const [isFallbackConversation, setIsFallbackConversation] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [scrapedSource, setScrapedSource] = useState<ScrapedSource | null>(null);
   const [conversationRounds, setConversationRounds] = useState<ConversationRound[]>([]);
   const [lastFetchedUrl, setLastFetchedUrl] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
 
   const isPlayable = conversationRounds.length > 0;
+
+  const clearAudio = () => {
+    const player = audioRef.current;
+    if (player) {
+      player.pause();
+      player.removeAttribute("src");
+      player.load();
+    }
+
+    setIsPlaying(false);
+    setAudioUrl((previousUrl) => {
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      audioUrlRef.current = null;
+      return null;
+    });
+  };
+
+  useEffect(() => {
+    audioUrlRef.current = audioUrl;
+  }, [audioUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+      }
+    };
+  }, []);
+
+  const generateAudio = async () => {
+    if (conversationRounds.length === 0) {
+      throw new Error("No conversation rounds available for audio generation.");
+    }
+
+    setIsGeneratingAudio(true);
+    setAudioError(null);
+
+    try {
+      const response = await fetch("/api/audio", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ rounds: conversationRounds }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: unknown };
+        const message =
+          typeof payload.error === "string" && payload.error.trim()
+            ? payload.error.trim()
+            : "Unable to generate audio.";
+        throw new Error(message);
+      }
+
+      const audioBlob = await response.blob();
+      if (audioBlob.size === 0) {
+        throw new Error("Generated audio was empty.");
+      }
+
+      const nextAudioUrl = URL.createObjectURL(audioBlob);
+      setAudioUrl((previousUrl) => {
+        if (previousUrl) {
+          URL.revokeObjectURL(previousUrl);
+        }
+        return nextAudioUrl;
+      });
+      return nextAudioUrl;
+    } finally {
+      setIsGeneratingAudio(false);
+    }
+  };
+
+  const playAudio = async ({ restart = false }: { restart?: boolean } = {}) => {
+    try {
+      setAudioError(null);
+
+      let resolvedAudioUrl = audioUrl;
+      if (!resolvedAudioUrl) {
+        resolvedAudioUrl = await generateAudio();
+      }
+
+      const player = audioRef.current;
+      if (!player || !resolvedAudioUrl) {
+        throw new Error("Audio player is not available.");
+      }
+
+      if (player.src !== resolvedAudioUrl) {
+        player.src = resolvedAudioUrl;
+      }
+
+      if (restart) {
+        player.currentTime = 0;
+      }
+
+      await player.play();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to play generated audio.";
+      setAudioError(message);
+      setIsPlaying(false);
+    }
+  };
+
+  const pauseAudio = () => {
+    const player = audioRef.current;
+    if (!player) {
+      return;
+    }
+
+    player.pause();
+  };
 
   const handleFetchSource = async () => {
     const normalizedUrl = url.trim();
@@ -44,7 +200,11 @@ export default function Home() {
     setIsFetchingSource(true);
     setFetchError(null);
     setConversationError(null);
+    setConversationNotice(null);
+    setIsFallbackConversation(false);
     setConversationRounds([]);
+    setAudioError(null);
+    clearAudio();
 
     try {
       const response = await fetch("/api/scrape", {
@@ -88,40 +248,92 @@ export default function Home() {
           }),
         });
 
-        const conversationPayload = (await conversationResponse.json()) as {
-          rounds?: Array<{ host?: unknown; text?: unknown }>;
-          error?: string;
-        };
-
         if (!conversationResponse.ok) {
-          throw new Error(conversationPayload.error ?? "Unable to generate conversation.");
+          const failedPayload = (await conversationResponse.json()) as { error?: string };
+          throw new Error(failedPayload.error ?? "Unable to generate conversation.");
         }
 
-        if (!Array.isArray(conversationPayload.rounds)) {
-          throw new Error("Received an invalid conversation response.");
+        if (!conversationResponse.body) {
+          throw new Error("Conversation stream was not available.");
         }
 
-        const parsedRounds = conversationPayload.rounds
-          .map((round) => {
-            const host = typeof round.host === "string" ? round.host.trim() : "";
-            const text = typeof round.text === "string" ? round.text.trim() : "";
+        const reader = conversationResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let didComplete = false;
+        let latestRounds: ConversationRound[] = [];
 
-            if (!host || !text) {
-              return null;
+        const processLine = (line: string) => {
+          if (!line.trim()) {
+            return;
+          }
+
+          const parsed = JSON.parse(line) as ConversationStreamEvent;
+          const eventType = typeof parsed.type === "string" ? parsed.type : "";
+
+          if (eventType === "notice" && typeof parsed.message === "string" && parsed.message.trim()) {
+            setConversationNotice(parsed.message.trim());
+            if (parsed.fallback === true) {
+              setIsFallbackConversation(true);
+            }
+            return;
+          }
+
+          if (eventType === "partial" || eventType === "complete") {
+            const rounds = parseConversationRounds(parsed.rounds);
+            if (rounds.length > 0) {
+              latestRounds = rounds;
+              setConversationRounds(rounds);
             }
 
-            return { host, text };
-          })
-          .filter((round): round is ConversationRound => round !== null);
+            if (parsed.fallback === true) {
+              setIsFallbackConversation(true);
+            }
 
-        if (parsedRounds.length !== 10) {
-          throw new Error("Conversation generation did not return 10 valid rounds.");
+            if (eventType === "complete") {
+              didComplete = true;
+            }
+            return;
+          }
+
+          if (eventType === "error") {
+            const message =
+              typeof parsed.error === "string" && parsed.error.trim()
+                ? parsed.error.trim()
+                : "Unable to generate conversation.";
+            throw new Error(message);
+          }
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+
+          let newlineIndex = buffer.indexOf("\n");
+          while (newlineIndex >= 0) {
+            const line = buffer.slice(0, newlineIndex);
+            buffer = buffer.slice(newlineIndex + 1);
+            processLine(line);
+            newlineIndex = buffer.indexOf("\n");
+          }
+
+          if (done) {
+            break;
+          }
         }
 
-        setConversationRounds(parsedRounds);
+        if (buffer.trim()) {
+          processLine(buffer);
+        }
+
+        if (!didComplete && latestRounds.length === 0) {
+          throw new Error("Conversation stream ended before returning rounds.");
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unable to generate conversation.";
         setConversationError(message);
+        setConversationNotice(null);
+        setIsFallbackConversation(false);
         setConversationRounds([]);
       } finally {
         setIsGeneratingConversation(false);
@@ -131,6 +343,11 @@ export default function Home() {
       setFetchError(message);
       setScrapedSource(null);
       setConversationRounds([]);
+      setConversationError(null);
+      setConversationNotice(null);
+      setIsFallbackConversation(false);
+      setAudioError(null);
+      clearAudio();
       setIsGeneratingConversation(false);
     } finally {
       setIsFetchingSource(false);
@@ -239,7 +456,9 @@ export default function Home() {
             <CardHeader className="flex-row items-center justify-between border-b border-border">
               <CardTitle className="text-2xl font-medium">Conversation</CardTitle>
               <Badge variant="secondary">
-                {isGeneratingConversation ? "Generating..." : `${conversationRounds.length} rounds`}
+                {isGeneratingConversation
+                  ? `Streaming... ${Math.min(conversationRounds.length, EXPECTED_ROUNDS)}/${EXPECTED_ROUNDS}`
+                  : `${conversationRounds.length} rounds`}
               </Badge>
             </CardHeader>
 
@@ -254,10 +473,22 @@ export default function Home() {
               {isGeneratingConversation ? (
                 <Card className="border-border bg-muted/40">
                   <CardContent className="p-3">
-                    <p className="text-sm font-medium">Generating conversation...</p>
+                    <p className="text-sm font-medium">Streaming conversation...</p>
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Building a structured 10-turn script with two host personalities.
+                      Structured rounds will appear below as they are generated.
                     </p>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {conversationNotice ? (
+                <Card className="border-border bg-muted/40">
+                  <CardContent className="p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium">Conversation notice</p>
+                      {isFallbackConversation ? <Badge variant="outline">Fallback</Badge> : null}
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">{conversationNotice}</p>
                   </CardContent>
                 </Card>
               ) : null}
@@ -276,13 +507,13 @@ export default function Home() {
                   <CardContent className="p-3">
                     <p className="text-sm font-medium">No conversation yet</p>
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Fetch a source URL to generate a structured 10-turn conversation.
+                      Fetch a source URL to stream a structured 10-turn conversation.
                     </p>
                   </CardContent>
                 </Card>
               ) : null}
 
-              {!isGeneratingConversation && !conversationError && conversationRounds.length > 0 ? (
+              {conversationRounds.length > 0 ? (
                 <div className="max-h-[68vh] space-y-3 overflow-y-auto pr-1">
                   {conversationRounds.map((round, index) => (
                     <Card key={`${round.host}-${index}`}>
@@ -300,7 +531,9 @@ export default function Home() {
           <Card className="rounded-2xl lg:col-span-3">
             <CardHeader className="flex-row items-center justify-between border-b border-border">
               <CardTitle className="text-2xl font-medium">Audio</CardTitle>
-              <Badge variant="secondary">{isPlaying ? "Playing" : "Paused"}</Badge>
+              <Badge variant="secondary">
+                {isGeneratingAudio ? "Generating..." : isPlaying ? "Playing" : audioUrl ? "Ready" : "Idle"}
+              </Badge>
             </CardHeader>
 
             <CardContent className="space-y-4 p-4">
@@ -308,32 +541,55 @@ export default function Home() {
                 <CardContent className="p-3">
                   <p className="text-sm font-medium text-muted-foreground">Transport Controls</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Pause is available only when audio is playable and currently playing.
+                    Audio is generated from the conversation rounds using ElevenLabs Text to Dialogue.
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Mode:{" "}
+                    {isGeneratingAudio
+                      ? "Generating"
+                      : isPlaying
+                        ? "Playing"
+                        : audioUrl
+                          ? "Ready"
+                          : "Idle"}
                   </p>
                 </CardContent>
               </Card>
 
               <div className="space-y-2">
-                <Button disabled={!isPlayable || isPlaying} onClick={() => setIsPlaying(true)} className="w-full">
-                  Play
+                <Button
+                  disabled={!isPlayable || isPlaying || isGeneratingAudio}
+                  onClick={() => void playAudio()}
+                  className="w-full"
+                >
+                  {audioUrl ? "Play" : "Generate + Play"}
                 </Button>
                 <Button
                   disabled={!isPlayable || !isPlaying}
                   variant="outline"
-                  onClick={() => setIsPlaying(false)}
+                  onClick={pauseAudio}
                   className="w-full"
                 >
                   Pause
                 </Button>
                 <Button
-                  disabled={!isPlayable}
+                  disabled={!isPlayable || isGeneratingAudio}
                   variant="secondary"
-                  onClick={() => setIsPlaying(false)}
+                  onClick={() => void playAudio({ restart: true })}
                   className="w-full"
                 >
-                  Restate audio
+                  Restart
                 </Button>
               </div>
+
+              {audioError ? (
+                <Card className="border-destructive/30 bg-destructive/5">
+                  <CardContent className="p-3">
+                    <p className="text-sm font-medium text-destructive">Audio generation failed</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{audioError}</p>
+                  </CardContent>
+                </Card>
+              ) : null}
 
               <Card>
                 <CardContent className="p-3">
@@ -350,10 +606,19 @@ export default function Home() {
                 </CardContent>
               </Card>
 
+              <audio
+                ref={audioRef}
+                preload="auto"
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => setIsPlaying(false)}
+                className="hidden"
+              />
+
               <p className="text-center text-xs text-muted-foreground">
                 {conversationRounds.length > 0
-                  ? "Conversation is generated from your source. Audio is still mock for UI testing."
-                  : "Generate a conversation to enable playback. Audio remains mock for UI testing."}
+                  ? "Play generates a real podcast dialogue audio from the current conversation."
+                  : "Generate a conversation first to enable audio generation."}
               </p>
             </CardContent>
           </Card>
