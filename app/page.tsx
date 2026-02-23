@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { FcReading } from "react-icons/fc";
 
 type ScrapedSource = {
   title: string;
@@ -39,6 +40,7 @@ function parseConversationRounds(rounds: unknown): ConversationRound[] {
     return [];
   }
 
+  // Normalize streamed model output and enforce safe host defaults per turn.
   return rounds
     .slice(0, EXPECTED_ROUNDS)
     .map((round, index) => {
@@ -101,6 +103,7 @@ export default function Home() {
   const progressPercent = audioDuration > 0 ? Math.min((audioCurrentTime / audioDuration) * 100, 100) : 0;
 
   const clearAudio = () => {
+    // Fully reset the hidden player and release any previously created object URL.
     const player = audioRef.current;
     if (player) {
       player.pause();
@@ -125,6 +128,7 @@ export default function Home() {
   }, [audioUrl]);
 
   useEffect(() => {
+    // Ensure browser memory is released if the component unmounts while audio is loaded.
     return () => {
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current);
@@ -307,6 +311,7 @@ export default function Home() {
         let latestRounds: ConversationRound[] = [];
 
         const processLine = (line: string) => {
+          // The conversation route streams NDJSON; each non-empty line is a standalone event.
           if (!line.trim()) {
             return;
           }
@@ -350,6 +355,7 @@ export default function Home() {
 
         while (true) {
           const { done, value } = await reader.read();
+          // A chunk can end mid-line, so keep buffering until a newline boundary exists.
           buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
 
           let newlineIndex = buffer.indexOf("\n");
@@ -403,11 +409,11 @@ export default function Home() {
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card/90 px-4 py-3 shadow-sm backdrop-blur sm:px-5">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-content-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
-              PA
+            <FcReading className="size-10" />  
             </div>
             <div>
               <p className="text-sm text-muted-foreground">AI Podcast Workspace - Prototype UI</p>
-              <h1 className="text-xl font-semibold tracking-tight">Untitled episode</h1>
+              <h1 className="text-xl font-semibold tracking-tight">Read, Listen, and Enjoy</h1>
             </div>
           </div>
 
