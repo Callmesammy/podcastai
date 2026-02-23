@@ -14,55 +14,20 @@ type ScrapedSource = {
   characters: number;
 };
 
-const conversationRounds = [
-  {
-    host: "Host Maya",
-    text: "Today we are exploring the article's claim that conversational pacing is the biggest factor in listener retention.",
-  },
-  {
-    host: "Host Theo",
-    text: "The scraped section points out that shorter turns and clearer transitions make AI podcasts feel less robotic.",
-  },
-  {
-    host: "Host Maya",
-    text: "I liked the practical framework: extract key ideas first, then map each idea to one natural exchange between hosts.",
-  },
-  {
-    host: "Host Theo",
-    text: "Exactly, and the article warns against dumping all facts in one monologue because people tune out quickly.",
-  },
-  {
-    host: "Host Maya",
-    text: "It also suggests adding contrasting opinions so each round has light tension, which keeps the dialogue alive.",
-  },
-  {
-    host: "Host Theo",
-    text: "From a production side, I noticed it emphasizes consistent host personalities across episodes for audience trust.",
-  },
-  {
-    host: "Host Maya",
-    text: "Another useful point was to summarize every few rounds, so late joiners still understand the context.",
-  },
-  {
-    host: "Host Theo",
-    text: "Right, and those mini recaps naturally create cue points where we can add music beds or chapter markers.",
-  },
-  {
-    host: "Host Maya",
-    text: "The final section recommends validating factual claims before rendering audio, even in quick-turnaround workflows.",
-  },
-  {
-    host: "Host Theo",
-    text: "So our key takeaway is simple: scrape for facts, script for flow, and produce with rhythm in mind.",
-  },
-];
+type ConversationRound = {
+  host: string;
+  text: string;
+};
 
 export default function Home() {
   const [url, setUrl] = useState("https://example.com/conversational-podcasting");
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFetchingSource, setIsFetchingSource] = useState(false);
+  const [isGeneratingConversation, setIsGeneratingConversation] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [conversationError, setConversationError] = useState<string | null>(null);
   const [scrapedSource, setScrapedSource] = useState<ScrapedSource | null>(null);
+  const [conversationRounds, setConversationRounds] = useState<ConversationRound[]>([]);
   const [lastFetchedUrl, setLastFetchedUrl] = useState<string | null>(null);
 
   const isPlayable = conversationRounds.length > 0;
@@ -78,6 +43,8 @@ export default function Home() {
 
     setIsFetchingSource(true);
     setFetchError(null);
+    setConversationError(null);
+    setConversationRounds([]);
 
     try {
       const response = await fetch("/api/scrape", {
@@ -105,10 +72,66 @@ export default function Home() {
         characters: payload.characters,
       });
       setLastFetchedUrl(payload.sourceURL);
+
+      setIsGeneratingConversation(true);
+
+      try {
+        const conversationResponse = await fetch("/api/conversation", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            title: payload.title,
+            sourceURL: payload.sourceURL,
+            excerpt: payload.excerpt,
+          }),
+        });
+
+        const conversationPayload = (await conversationResponse.json()) as {
+          rounds?: Array<{ host?: unknown; text?: unknown }>;
+          error?: string;
+        };
+
+        if (!conversationResponse.ok) {
+          throw new Error(conversationPayload.error ?? "Unable to generate conversation.");
+        }
+
+        if (!Array.isArray(conversationPayload.rounds)) {
+          throw new Error("Received an invalid conversation response.");
+        }
+
+        const parsedRounds = conversationPayload.rounds
+          .map((round) => {
+            const host = typeof round.host === "string" ? round.host.trim() : "";
+            const text = typeof round.text === "string" ? round.text.trim() : "";
+
+            if (!host || !text) {
+              return null;
+            }
+
+            return { host, text };
+          })
+          .filter((round): round is ConversationRound => round !== null);
+
+        if (parsedRounds.length !== 10) {
+          throw new Error("Conversation generation did not return 10 valid rounds.");
+        }
+
+        setConversationRounds(parsedRounds);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to generate conversation.";
+        setConversationError(message);
+        setConversationRounds([]);
+      } finally {
+        setIsGeneratingConversation(false);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to scrape the provided URL.";
       setFetchError(message);
       setScrapedSource(null);
+      setConversationRounds([]);
+      setIsGeneratingConversation(false);
     } finally {
       setIsFetchingSource(false);
     }
@@ -215,7 +238,9 @@ export default function Home() {
           <Card className="rounded-2xl lg:col-span-6">
             <CardHeader className="flex-row items-center justify-between border-b border-border">
               <CardTitle className="text-2xl font-medium">Conversation</CardTitle>
-              <Badge variant="secondary">10 rounds</Badge>
+              <Badge variant="secondary">
+                {isGeneratingConversation ? "Generating..." : `${conversationRounds.length} rounds`}
+              </Badge>
             </CardHeader>
 
             <CardContent className="space-y-4 p-4">
@@ -226,16 +251,49 @@ export default function Home() {
                 </CardHeader>
               </Card>
 
-              <div className="max-h-[68vh] space-y-3 overflow-y-auto pr-1">
-                {conversationRounds.map((round, index) => (
-                  <Card key={`${round.host}-${index}`}>
-                    <CardContent className="p-4">
-                      <p className="text-sm font-semibold text-foreground">{round.host}</p>
-                      <p className="mt-2 text-base leading-relaxed text-muted-foreground">{round.text}</p>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+              {isGeneratingConversation ? (
+                <Card className="border-border bg-muted/40">
+                  <CardContent className="p-3">
+                    <p className="text-sm font-medium">Generating conversation...</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Building a structured 10-turn script with two host personalities.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {!isGeneratingConversation && conversationError ? (
+                <Card className="border-destructive/30 bg-destructive/5">
+                  <CardContent className="p-3">
+                    <p className="text-sm font-medium text-destructive">Conversation generation failed</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{conversationError}</p>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {!isGeneratingConversation && !conversationError && conversationRounds.length === 0 ? (
+                <Card className="bg-muted/40">
+                  <CardContent className="p-3">
+                    <p className="text-sm font-medium">No conversation yet</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Fetch a source URL to generate a structured 10-turn conversation.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {!isGeneratingConversation && !conversationError && conversationRounds.length > 0 ? (
+                <div className="max-h-[68vh] space-y-3 overflow-y-auto pr-1">
+                  {conversationRounds.map((round, index) => (
+                    <Card key={`${round.host}-${index}`}>
+                      <CardContent className="p-4">
+                        <p className="text-sm font-semibold text-foreground">{round.host}</p>
+                        <p className="mt-2 text-base leading-relaxed text-muted-foreground">{round.text}</p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -293,7 +351,9 @@ export default function Home() {
               </Card>
 
               <p className="text-center text-xs text-muted-foreground">
-                Conversation and audio data are still mock for UI testing.
+                {conversationRounds.length > 0
+                  ? "Conversation is generated from your source. Audio is still mock for UI testing."
+                  : "Generate a conversation to enable playback. Audio remains mock for UI testing."}
               </p>
             </CardContent>
           </Card>
