@@ -19,6 +19,11 @@ type ConversationRound = {
   text: string;
 };
 
+type AudioConversationMessage = {
+  speaker: string;
+  text: string;
+};
+
 type ConversationStreamEvent = {
   type?: unknown;
   rounds?: unknown;
@@ -55,6 +60,17 @@ function parseConversationRounds(rounds: unknown): ConversationRound[] {
     .filter((round): round is ConversationRound => round !== null);
 }
 
+function formatClock(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return "0:00";
+  }
+
+  const wholeSeconds = Math.floor(seconds);
+  const minutes = Math.floor(wholeSeconds / 60);
+  const remainder = wholeSeconds % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
 export default function Home() {
   const [url, setUrl] = useState("https://example.com/conversational-podcasting");
   const [isPlaying, setIsPlaying] = useState(false);
@@ -67,13 +83,22 @@ export default function Home() {
   const [isFallbackConversation, setIsFallbackConversation] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
   const [scrapedSource, setScrapedSource] = useState<ScrapedSource | null>(null);
   const [conversationRounds, setConversationRounds] = useState<ConversationRound[]>([]);
   const [lastFetchedUrl, setLastFetchedUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
 
-  const isPlayable = conversationRounds.length > 0;
+  const conversationMessages: AudioConversationMessage[] = conversationRounds.map((round) => ({
+    speaker: round.host,
+    text: round.text,
+  }));
+
+  const isPlayable = conversationMessages.length > 0;
+  const hasAudioReady = Boolean(audioUrl);
+  const progressPercent = audioDuration > 0 ? Math.min((audioCurrentTime / audioDuration) * 100, 100) : 0;
 
   const clearAudio = () => {
     const player = audioRef.current;
@@ -84,6 +109,8 @@ export default function Home() {
     }
 
     setIsPlaying(false);
+    setAudioCurrentTime(0);
+    setAudioDuration(0);
     setAudioUrl((previousUrl) => {
       if (previousUrl) {
         URL.revokeObjectURL(previousUrl);
@@ -106,8 +133,8 @@ export default function Home() {
   }, []);
 
   const generateAudio = async () => {
-    if (conversationRounds.length === 0) {
-      throw new Error("No conversation rounds available for audio generation.");
+    if (conversationMessages.length === 0) {
+      throw new Error("No conversation messages available for audio generation.");
     }
 
     setIsGeneratingAudio(true);
@@ -119,7 +146,7 @@ export default function Home() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ rounds: conversationRounds }),
+        body: JSON.stringify({ messages: conversationMessages }),
       });
 
       if (!response.ok) {
@@ -137,6 +164,17 @@ export default function Home() {
       }
 
       const nextAudioUrl = URL.createObjectURL(audioBlob);
+
+      const player = audioRef.current;
+      if (player) {
+        player.pause();
+        player.src = nextAudioUrl;
+        player.currentTime = 0;
+        player.load();
+      }
+
+      setAudioCurrentTime(0);
+      setAudioDuration(0);
       setAudioUrl((previousUrl) => {
         if (previousUrl) {
           URL.revokeObjectURL(previousUrl);
@@ -169,6 +207,7 @@ export default function Home() {
 
       if (restart) {
         player.currentTime = 0;
+        setAudioCurrentTime(0);
       }
 
       await player.play();
@@ -186,6 +225,10 @@ export default function Home() {
     }
 
     player.pause();
+  };
+
+  const restartAudio = async () => {
+    await playAudio({ restart: true });
   };
 
   const handleFetchSource = async () => {
@@ -369,7 +412,6 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button className="rounded-full">+ Create episode</Button>
             <Button variant="outline" className="rounded-full">
               Share
             </Button>
@@ -532,40 +574,33 @@ export default function Home() {
             <CardHeader className="flex-row items-center justify-between border-b border-border">
               <CardTitle className="text-2xl font-medium">Audio</CardTitle>
               <Badge variant="secondary">
-                {isGeneratingAudio ? "Generating..." : isPlaying ? "Playing" : audioUrl ? "Ready" : "Idle"}
+                {isGeneratingAudio ? "Generating..." : isPlaying ? "Playing" : hasAudioReady ? "Ready" : "Idle"}
               </Badge>
             </CardHeader>
 
             <CardContent className="space-y-4 p-4">
               <Card className="bg-muted/40">
                 <CardContent className="p-3">
-                  <p className="text-sm font-medium text-muted-foreground">Transport Controls</p>
+                  <p className="text-sm font-medium text-muted-foreground">ElevenLabs Text to Dialogue</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Audio is generated from the conversation rounds using ElevenLabs Text to Dialogue.
+                    Sends the generated conversation messages from the middle panel to the ElevenLabs SDK.
                   </p>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Mode:{" "}
-                    {isGeneratingAudio
-                      ? "Generating"
-                      : isPlaying
-                        ? "Playing"
-                        : audioUrl
-                          ? "Ready"
-                          : "Idle"}
+                    Messages ready: {conversationMessages.length}
                   </p>
                 </CardContent>
               </Card>
 
               <div className="space-y-2">
                 <Button
-                  disabled={!isPlayable || isPlaying || isGeneratingAudio}
+                  disabled={!isPlayable || isGeneratingAudio}
                   onClick={() => void playAudio()}
                   className="w-full"
                 >
-                  {audioUrl ? "Play" : "Generate + Play"}
+                  {isGeneratingAudio ? "Generating..." : hasAudioReady ? "Play" : "Generate + Play"}
                 </Button>
                 <Button
-                  disabled={!isPlayable || !isPlaying}
+                  disabled={!hasAudioReady || !isPlaying}
                   variant="outline"
                   onClick={pauseAudio}
                   className="w-full"
@@ -575,7 +610,7 @@ export default function Home() {
                 <Button
                   disabled={!isPlayable || isGeneratingAudio}
                   variant="secondary"
-                  onClick={() => void playAudio({ restart: true })}
+                  onClick={() => void restartAudio()}
                   className="w-full"
                 >
                   Restart
@@ -593,15 +628,17 @@ export default function Home() {
 
               <Card>
                 <CardContent className="p-3">
-                  <p className="text-sm font-medium text-muted-foreground">Wave Preview</p>
-                  <div className="mt-3 flex h-16 items-end gap-1 rounded-lg bg-muted/40 px-2 py-2">
-                    {Array.from({ length: 28 }).map((_, i) => (
-                      <span
-                        key={i}
-                        className={`w-1 rounded-full ${isPlaying ? "bg-emerald-400" : "bg-muted-foreground/40"}`}
-                        style={{ height: `${18 + ((i * 13) % 38)}px` }}
-                      />
-                    ))}
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-muted-foreground">Playback</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatClock(audioCurrentTime)} / {formatClock(audioDuration)}
+                    </p>
+                  </div>
+                  <div className="mt-3 h-2 rounded-full bg-muted/70">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{ width: `${progressPercent}%` }}
+                    />
                   </div>
                 </CardContent>
               </Card>
@@ -611,12 +648,18 @@ export default function Home() {
                 preload="auto"
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
-                onEnded={() => setIsPlaying(false)}
+                onTimeUpdate={(event) => setAudioCurrentTime(event.currentTarget.currentTime)}
+                onLoadedMetadata={(event) => setAudioDuration(event.currentTarget.duration || 0)}
+                onEnded={(event) => {
+                  setIsPlaying(false);
+                  const finalTime = event.currentTarget.duration || event.currentTarget.currentTime;
+                  setAudioCurrentTime(Number.isFinite(finalTime) ? finalTime : 0);
+                }}
                 className="hidden"
               />
 
               <p className="text-center text-xs text-muted-foreground">
-                {conversationRounds.length > 0
+                {conversationMessages.length > 0
                   ? "Play generates a real podcast dialogue audio from the current conversation."
                   : "Generate a conversation first to enable audio generation."}
               </p>
