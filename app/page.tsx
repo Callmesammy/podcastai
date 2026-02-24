@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { FcReading } from "react-icons/fc";
 
 type ScrapedSource = {
   title: string;
@@ -408,8 +407,8 @@ export default function Home() {
       <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-4">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card/90 px-4 py-3 shadow-sm backdrop-blur sm:px-5">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-content-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
-            <FcReading className="size-10" />  
+            <div className="grid h-10 w-10 place-content-center rounded-full bg-white text-sm font-semibold text-primary-foreground">
+              RD
             </div>
             <div>
               <p className="text-sm text-muted-foreground">AI Podcast Workspace - Prototype UI</p>
