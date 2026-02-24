@@ -188,4 +188,7 @@ docs/business/overview.md   # Product overview
 - `Arabella`: bubbly, excited, optimistic
 - `Grandpa Spuds Oxley`: skeptical, sarcastic, witty
 
-These are enforced in conversation generation and preserved through audio synthesis.
+These are enforced in conversation generation and preserved through audio synthesis.<img width="3777" height="1756" alt="Screenshot (8)" src="https://github.com/user-attachments/assets/4868414a-77e4-4493-a00f-ee9749bc5d42" />
+
+
+
