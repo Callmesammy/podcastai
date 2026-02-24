@@ -502,10 +502,17 @@ export default function Home() {
             </CardHeader>
 
             <CardContent className="space-y-4 p-4">
-              <Card className="bg-muted/40">
+              <Card className="border-border/70 bg-gradient-to-r from-emerald-500/20 via-emerald-400/10 to-lime-400/20">
                 <CardHeader className="p-4">
-                  <CardDescription>Scraped content discussion</CardDescription>
-                  <CardTitle className="text-3xl font-semibold tracking-tight">Two-host dialogue preview</CardTitle>
+                  <div className="flex items-center gap-3">
+                    <div className="grid h-10 w-10 place-content-center rounded-full bg-emerald-500/20 text-sm font-semibold text-foreground">
+                      HC
+                    </div>
+                    <div>
+                      <CardDescription className="text-foreground/70">Podcast chat transcript</CardDescription>
+                      <CardTitle className="text-2xl font-semibold tracking-tight">Host Conversation</CardTitle>
+                    </div>
+                  </div>
                 </CardHeader>
               </Card>
 
@@ -553,16 +560,37 @@ export default function Home() {
               ) : null}
 
               {conversationRounds.length > 0 ? (
-                <div className="max-h-[68vh] space-y-3 overflow-y-auto pr-1">
-                  {conversationRounds.map((round, index) => (
-                    <Card key={`${round.host}-${index}`}>
-                      <CardContent className="p-4">
-                        <p className="text-sm font-semibold text-foreground">{round.host}</p>
-                        <p className="mt-2 text-base leading-relaxed text-muted-foreground">{round.text}</p>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                <Card className="border-border/70 bg-gradient-to-b from-emerald-100/80 via-lime-50/60 to-teal-100/70 dark:from-emerald-950/40 dark:via-slate-900 dark:to-teal-950/40">
+                  <CardContent className="p-3">
+                    <div className="max-h-[68vh] space-y-2 overflow-y-auto rounded-2xl border border-border/60 bg-background/45 p-2 backdrop-blur-sm">
+                      {conversationRounds.map((round, index) => {
+                        const isLeftBubble = index % 2 === 0;
+
+                        return (
+                          <div
+                            key={`${round.host}-${index}`}
+                            className={`flex ${isLeftBubble ? "justify-start" : "justify-end"}`}
+                          >
+                            <Card
+                              className={`w-full max-w-[88%] border shadow-sm ${
+                                isLeftBubble
+                                  ? "rounded-3xl rounded-bl-md border-border/80 bg-card/95"
+                                  : "rounded-3xl rounded-br-md border-emerald-500/30 bg-emerald-100/80 dark:bg-emerald-950/50"
+                              }`}
+                            >
+                              <CardContent className="px-4 py-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                  {round.host}
+                                </p>
+                                <p className="mt-1 text-base leading-relaxed text-foreground">{round.text}</p>
+                              </CardContent>
+                            </Card>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
               ) : null}
             </CardContent>
           </Card>
