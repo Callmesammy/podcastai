@@ -416,14 +416,6 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" className="rounded-full">
-              Share
-            </Button>
-            <Button variant="outline" className="rounded-full">
-              Settings
-            </Button>
-          </div>
         </header>
 
         <main className="grid gap-4 lg:grid-cols-12">

@@ -105,7 +105,7 @@ function buildFallbackRounds({
   const [pointA, pointB, pointC, pointD] = points;
 
   const fallbackTexts = [
-    `OpenAI generation is unavailable right now, so here is a live preview from "${title}" on ${domain}.`,
+    `Quick detour into improv mode: we are unpacking "${title}" from ${domain}, and this preview should still be a fun listen.`,
     `Let's start with the gist: ${pointA ?? "the source introduces a clear main theme and why it matters."}`,
     `I like that it keeps the framing practical instead of getting lost in theory.`,
     `${pointB ?? "It gives enough detail to understand the key points quickly."}`,
